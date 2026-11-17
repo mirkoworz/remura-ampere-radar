@@ -1,0 +1,101 @@
+name: Radar OCI SDK comparator LAB
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Enter SDK_CAPACITY_ONLY_ONCE for one official SDK report'
+        required: true
+        type: string
+permissions: {}
+concurrency:
+  group: radar-global
+  cancel-in-progress: false
+jobs:
+  sdk-capacity:
+    if: github.repository == 'mirkoworz/remura-ampere-radar' && github.ref == 'refs/heads/main' && github.actor == 'mirkoworz' && github.triggering_actor == 'mirkoworz' && github.run_attempt == 1 && inputs.confirm == 'SDK_CAPACITY_ONLY_ONCE'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - name: Install verified version of official SDK without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/radar-sdk"
+          py="$RUNNER_TEMP/radar-sdk/bin/python"
+          mkdir -p "$RUNNER_TEMP/radar-wheel"
+          cd "$RUNNER_TEMP/radar-wheel"
+          "$py" -m pip --isolated --disable-pip-version-check download --index-url https://pypi.org/simple --no-cache-dir --only-binary=:all: --no-deps oci==2.191.0
+          echo 'f149bc6e49d5e11a781d1085b222079eb3eefe59732bb1db9409d6b45a873194  oci-2.191.0-py3-none-any.whl' | sha256sum -c -
+          "$py" -m pip --isolated --disable-pip-version-check install --index-url https://pypi.org/simple --no-cache-dir --only-binary=:all: ./oci-2.191.0-py3-none-any.whl
+          "$py" -m pip check
+          "$py" -c 'import oci; assert oci.__version__ == "2.191.0"'
+      - name: Compare one official signed capacity report
+        shell: bash
+        env:
+          RADAR_OCI_TENANCY: ${{ secrets.RADAR_OCI_TENANCY }}
+          RADAR_OCI_USER: ${{ secrets.RADAR_OCI_USER }}
+          RADAR_OCI_FINGERPRINT: ${{ secrets.RADAR_OCI_FINGERPRINT }}
+          RADAR_OCI_AD: ${{ secrets.RADAR_OCI_AD }}
+          RADAR_OCI_PRIVATE_KEY: ${{ secrets.RADAR_OCI_PRIVATE_KEY }}
+          OCI_SDK_DEFAULT_RETRY_ENABLED: 'False'
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/radar-sdk/bin/python" -I - <<'PY'
+          import os, sys, re, logging
+          import oci
+          logging.disable(logging.CRITICAL)
+          def main():
+              config = dict(tenancy=os.environ["RADAR_OCI_TENANCY"], user=os.environ["RADAR_OCI_USER"],
+                            fingerprint=os.environ["RADAR_OCI_FINGERPRINT"], region="eu-milan-1",
+                            key_content=os.environ["RADAR_OCI_PRIVATE_KEY"])
+              ad=os.environ["RADAR_OCI_AD"]
+              oci.config.validate_config(config)
+              if not re.fullmatch(r"[A-Za-z0-9]{4}:EU-MILAN-1-AD-1",ad):
+                  raise ValueError("AD")
+              endpoint="https://iaas.eu-milan-1.oraclecloud.com"
+              client=oci.core.ComputeClient(config,service_endpoint=endpoint,timeout=(5,20),
+                  retry_strategy=oci.retry.NoneRetryStrategy())
+              session=client.base_client.session
+              send=session.send
+              calls=0
+              def guarded(request, **kwargs):
+                  nonlocal calls
+                  if calls or request.method!="POST" or request.url!=endpoint+"/20160918/computeCapacityReports":
+                      raise ValueError("blocked request")
+                  calls+=1
+                  kwargs["allow_redirects"]=False
+                  kwargs["verify"]=True
+                  return send(request,**kwargs)
+              session.send=guarded
+              models=oci.core.models
+              targets=[(2,12),(1,6)]
+              details=models.CreateComputeCapacityReportDetails(compartment_id=config["tenancy"],availability_domain=ad,
+                  shape_availabilities=[models.CreateCapacityReportShapeAvailabilityDetails(instance_shape="VM.Standard.A1.Flex",
+                      instance_shape_config=models.CapacityReportInstanceShapeConfig(ocpus=c,memory_in_gbs=m)) for c,m in targets])
+              try:
+                  response=client.create_compute_capacity_report(details,retry_strategy=oci.retry.NoneRetryStrategy())
+              except oci.exceptions.ServiceError as e:
+                  status=e.status
+                  print("SDK_LAB_HTTP_"+str(status) if status in (400,401,403,404,429,500,502,503,504) else "SDK_LAB_HTTP_OTHER")
+                  if e.code=="NotAuthenticated": print("SDK_LAB_NOT_AUTHENTICATED")
+                  sys.exit(1)
+              if calls!=1 or response.status not in (200,201):
+                  raise ValueError("status")
+              d=response.data
+              if d.compartment_id!=config["tenancy"] or d.availability_domain!=ad or len(d.shape_availabilities)!=2:
+                  raise ValueError("schema")
+              for cpu,ram in targets:
+                  rows=[r for r in d.shape_availabilities if r.instance_shape=="VM.Standard.A1.Flex" and r.instance_shape_config and r.instance_shape_config.ocpus==cpu and r.instance_shape_config.memory_in_gbs==ram]
+                  if len(rows)!=1 or rows[0].fault_domain is not None: raise ValueError("target")
+                  r=rows[0]
+                  if r.availability_status not in ("AVAILABLE","OUT_OF_HOST_CAPACITY","HARDWARE_NOT_SUPPORTED"): raise ValueError("enum")
+                  if r.availability_status=="AVAILABLE":
+                      if r.available_count is not None and (type(r.available_count)!=int or r.available_count<=0): raise ValueError("count")
+                  elif r.available_count not in (None,0): raise ValueError("count")
+              print("SDK_LAB_COMPLETE_TWO_TARGETS_NO_PROVISION")
+          try:
+              main()
+          except Exception:
+              print("SDK_LAB_STOP_REVIEW_REQUIRED")
+              sys.exit(1)
+          PY
