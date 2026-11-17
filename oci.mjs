@@ -20,7 +20,7 @@ async function makeCapacityReport({config,clock,hash,sign,request,assess,classif
  try{built=buildRequest({...config,now:clock(),hash,sign});}catch{return {error:"AUTH"}}
  try{
  const {status,body}=await request(built);
- if(status!==200)return {error:classifyError(typeof body?.code==="string"?body.code:"",status)};
+ if(status!==200&&status!==201)return {error:classifyError(typeof body?.code==="string"?body.code:"",status)};
  return normalizeReport(body,config,assess);
  }catch{return {error:"API"}}
 }
@@ -33,6 +33,7 @@ async function testOCI(){
  let calls=0;const input={config,clock,hash,sign,request:async r=>{calls++;eq(r.url,"https://iaas.eu-milan-1.oraclecloud.com/20160918/computeCapacityReports");eq(r.method,"POST");eq(r.headers["content-length"],String(r.body.length));eq(JSON.parse(r.body).shapeAvailabilities.length,2);return {status:200,body}},assess:r=>({rows:r}),classifyError:(code,status)=>status===429?"RATE_LIMIT":"UNKNOWN"};
  const result=await makeCapacityReport(input);eq(result.rows[0]["available-count"],null);eq(result.rows[0]["instance-shape-config"]["memory-in-gbs"],12);eq(result.rows[1]["availability-status"],"OUT_OF_HOST_CAPACITY");eq(calls,1);
  eq((await makeCapacityReport({...input,config:{...config,ad:"WRONG"}})).error,"AUTH");eq(calls,1);
+ eq((await makeCapacityReport({...input,request:async()=>({status:201,body})})).rows[0]["available-count"],null);
  eq((await makeCapacityReport({...input,request:async()=>({status:429,body:{}})})).error,"RATE_LIMIT");
  eq((await makeCapacityReport({...input,request:async()=>{throw Error("SECRET")}})).error,"API");
  eq((await makeCapacityReport({...input,request:async()=>({status:200,body:{...body,compartmentId:"wrong"}})})).error,"UNKNOWN");
