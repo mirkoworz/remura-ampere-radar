@@ -1,0 +1,43 @@
+name: Radar release disabled LAB
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Enter VERIFY_DISABLED_ONLY (read private state, no writes or probes)'
+        required: true
+        type: string
+permissions: {}
+concurrency:
+  group: radar-global
+  cancel-in-progress: false
+jobs:
+  release-preflight:
+    if: github.repository == 'mirkoworz/remura-ampere-radar' && github.ref == 'refs/heads/main' && github.actor == 'mirkoworz' && github.triggering_actor == 'mirkoworz' && github.run_attempt == 1 && inputs.confirm == 'VERIFY_DISABLED_ONLY'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Verify pinned source and offline regressions without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_TERMINAL_PROMPT=0
+          git init lab
+          cd lab
+          git -c credential.helper= fetch --depth=1 https://github.com/mirkoworz/remura-ampere-radar.git 409eeb98049f89bb68653f2b278edb43d712a043
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "409eeb98049f89bb68653f2b278edb43d712a043"
+          node -e 'if (+process.versions.node.split(".")[0] < 22) process.exit(1)'
+          node --check release-disabled-lab.mjs
+          node cycle-test.mjs
+          node runtime-test.mjs
+          node release-test.mjs
+      - name: Read and validate disabled operational state only
+        shell: bash
+        env:
+          RADAR_RELEASE_GATE: VERIFY_DISABLED_ONLY
+          RADAR_STATE_TOKEN: ${{ secrets.RADAR_STATE_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd lab
+          test "$(git rev-parse HEAD)" = "409eeb98049f89bb68653f2b278edb43d712a043"
+          node release-disabled-lab.mjs
