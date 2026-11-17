@@ -1,0 +1,44 @@
+# v0.8 LAB — 2026-11-17 CET. Manual read-only diagnostic; no Oracle or scheduler.
+name: Radar state read-only LAB
+on:
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: radar-state-readonly-lab
+  cancel-in-progress: false
+jobs:
+  read-only:
+    if: github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Verify disabled state without exposing data
+        shell: bash
+        env:
+          RADAR_STATE_TOKEN: ${{ secrets.RADAR_STATE_TOKEN }}
+        run: |
+          node --input-type=module <<'NODE'
+          async function smoke({token,owner,fetchImpl,timeout,decode,base64decode}){
+           if(!/^github_pat_[A-Za-z0-9_]+$/.test(token??"")||token.length>512||!/^[A-Za-z0-9-]+$/.test(owner??""))return "INVALID_CONFIGURATION";
+           const url="https://api.github.com/repos/"+owner+"/remura-radar-state/contents/state.json?ref=main";
+           let reader;
+           try{
+           const r=await fetchImpl(url,{method:"GET",redirect:"error",cache:"no-store",signal:timeout(),headers:{Authorization:"Bearer "+token,Accept:"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28"}});
+           if(r.status!==200){try{await r.body?.cancel();}catch{}return "READ_FAILED";}
+           reader=r.body?.getReader();if(!reader)return "READ_FAILED";
+           let size=0;const chunks=[];
+           while(true){const p=await reader.read();if(p.done)break;size+=p.value.byteLength;if(size>32768)return "READ_FAILED";chunks.push(p.value);}
+           const data=new Uint8Array(size);let off=0;for(const c of chunks){data.set(c,off);off+=c.byteLength;}
+           const file=JSON.parse(decode(data));
+           if(file.type!=="file"||file.encoding!=="base64"||typeof file.content!=="string"||file.content.length>8192||!/^[a-f0-9]{40}$/.test(file.sha??""))return "INVALID_STATE";
+           const encoded=file.content.replace(/\s/g,"");
+           if(!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded))return "INVALID_STATE";
+           const s=JSON.parse(base64decode(encoded));
+           if(s?.schema!==1||s.enabled!==false||s.revision!==0||s.nextAt!==Number.MAX_SAFE_INTEGER||s.last!==null||!Array.isArray(s.pending)||s.pending.length!==0)return "INVALID_OR_ENABLED_STATE";
+           return "READONLY_OK_DISABLED";
+           }catch{return "READ_FAILED";}
+           finally{try{await reader?.cancel();reader?.releaseLock();}catch{}}
+          }
+          const result=await smoke({token:process.env.RADAR_STATE_TOKEN,owner:process.env.GITHUB_REPOSITORY_OWNER,fetchImpl:fetch,timeout:()=>AbortSignal.timeout(15000),decode:b=>new TextDecoder("utf-8",{fatal:true}).decode(b),base64decode:s=>new TextDecoder("utf-8",{fatal:true}).decode(Buffer.from(s,"base64"))});
+          console.log(result);if(result!=="READONLY_OK_DISABLED")process.exitCode=1;
+          NODE
