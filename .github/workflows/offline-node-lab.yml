@@ -31,3 +31,5 @@ jobs:
           node runtime-test.mjs
           node release-test.mjs
           node operations-test.mjs
+          node --check operations-entry.mjs
+          node activation-test.mjs
