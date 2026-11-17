@@ -3,16 +3,17 @@ import {makeStore} from "./store.mjs";
 import {makeGitHubTransport} from "./transport.mjs";
 import {createOCIProbe} from "./oci.mjs";
 import {runCycle} from "./cycle.mjs";
+import {healthOutcome} from "./health.mjs";
 import {deliverAlert} from "./alerts.mjs";
 
 function formatCapacityAlert(event){
  if(!event||!["2/12","1/6"].includes(event.key)||!Number.isSafeInteger(event.observedAt)||event.observedAt<0||event.observedAt>8640000000000000)throw Error("event");
  const [cpu,ram]=event.key.split("/");
  const date=new Intl.DateTimeFormat("it-IT",{timeZone:"Europe/Rome",dateStyle:"short",timeStyle:"medium"}).format(new Date(event.observedAt));
- return "REMURA Ampere Radar — disponibilità segnalata\n"+date+" (ora italiana)\nOracle Milano: "+cpu+" OCPU / "+ram+" GB RAM\n"+(event.key==="2/12"?"Configurazione preferita.":"Configurazione alternativa.")+"\nÈ una segnalazione di capacità, non una garanzia di quota o creazione. Verifica la console Oracle. Nessuna VPS prenotata o creata.";
+ return "REMURA Ampere Radar v0.28 LAB — disponibilità segnalata\n"+date+" (ora italiana)\nOracle Milano: "+cpu+" OCPU / "+ram+" GB RAM\n"+(event.key==="2/12"?"Configurazione preferita.":"Configurazione alternativa.")+"\nÈ una segnalazione di capacità, non una garanzia di quota o creazione. Verifica la console Oracle. Nessuna VPS prenotata o creata.";
 }
 
-function buildRuntime({env,fetchImpl=globalThis.fetch,clock=Date.now}){
+function buildRuntime({env,fetchImpl=globalThis.fetch,clock=Date.now,probeFactory=createOCIProbe}){
  if(env.RADAR_RUNTIME_GATE!=="LIVE_CAPACITY_ONLY"||env.GITHUB_REPOSITORY!=="mirkoworz/remura-ampere-radar"||env.GITHUB_REF!=="refs/heads/main"||env.GITHUB_RUN_ATTEMPT!=="1")throw Error("runtime gate");
  const repository="mirkoworz/remura-radar-state";
  const request=makeGitHubTransport({repository,token:env.RADAR_STATE_TOKEN,fetchImpl});
@@ -23,7 +24,7 @@ function buildRuntime({env,fetchImpl=globalThis.fetch,clock=Date.now}){
    if(initial.state.enabled!==true)return "DISABLED";
    if(!/^\d{5,20}:[A-Za-z0-9_-]{20,100}$/.test(token??"")||!/^[1-9]\d{0,15}$/.test(chatId??""))return "CONFIG_REVIEW_REQUIRED";
    const config={tenancy:env.RADAR_OCI_TENANCY,user:env.RADAR_OCI_USER,fingerprint:env.RADAR_OCI_FINGERPRINT,ad:env.RADAR_OCI_AD};
-   const probe=createOCIProbe({config,privateKey:env.RADAR_OCI_PRIVATE_KEY,clock});
+   const probe=probeFactory({config,privateKey:env.RADAR_OCI_PRIVATE_KEY,clock});
    const deliver=event=>deliverAlert({token,chatId,event,timeout:()=>AbortSignal.timeout(15000),fetchImpl:async(url,opts)=>{
      if(url!=="https://api.telegram.org/bot"+token+"/sendMessage"||opts?.method!=="POST"||opts.redirect!=="error")throw Error("delivery gate");
      const body=JSON.parse(opts.body);
@@ -39,7 +40,10 @@ function buildRuntime({env,fetchImpl=globalThis.fetch,clock=Date.now}){
      const data=JSON.parse(Buffer.concat(chunks).toString("utf8"));
      return {status:200,json:async()=>data};
    }});
-   return runCycle({store,probe,deliver,clock});
+   const outcome=await runCycle({store,probe,deliver,clock});
+   if(outcome!=="INCOMPLETE_NO_SEND")return outcome;
+   const end=await store.read();
+   return healthOutcome(initial.state.health,end.state.health,outcome);
  };
  return {run};
 }
