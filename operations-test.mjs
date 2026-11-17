@@ -24,7 +24,7 @@ for(const mode of ["conflict","ambiguous","reread","wrongread"]){x=fixture(mode)
 x=fixture("badread");eq(await executeMaintenance(x.args),"MAINTENANCE_READ_UNCERTAIN");eq(x.writes(),0);
 const healthy={...base,delivery:null,pending:[],last:null};
 eq(heartbeat({...healthy,enabled:false},now),"WATCHDOG_DISABLED");eq(heartbeat(base,now),"WATCHDOG_DELIVERY_REVIEW");eq(heartbeat(healthy,now),"WATCHDOG_OK");eq(heartbeat(healthy,now+5400001),"WATCHDOG_OVERDUE");
-eq(heartbeat({...healthy,health:undefined,nextAt:now+1000},now),"WATCHDOG_AWAIT_FIRST");eq(heartbeat({...healthy,health:{...healthy.health,lastProbeAt:now+1}},now),"WATCHDOG_CLOCK_REVIEW");
+eq(heartbeat({...healthy,health:undefined,nextAt:now+1000},now),"WATCHDOG_AWAIT_FIRST");eq(heartbeat({...healthy,health:{...healthy.health,lastProbeAt:now+1,lastGoodAt:now+1}},now),"WATCHDOG_CLOCK_REVIEW");
 eq(heartbeat({...healthy,health:{...healthy.health,error:"AUTH",failures:1}},now),"WATCHDOG_CRITICAL");eq(heartbeat({...healthy,health:{...healthy.health,error:"API",failures:2}},now),"WATCHDOG_PERSISTENT");eq(heartbeat({},now),"WATCHDOG_REVIEW");
 let calls=0;const makeRuntime=()=>({run:async()=>{calls++;return "DELIVERED"}});
 for(const patch of [{RADAR_OPERATOR_ENABLE:"OFF"},{GITHUB_REF:"refs/heads/other"},{GITHUB_RUN_ATTEMPT:"2"},{GITHUB_ACTOR:"other"},{GITHUB_EVENT_NAME:"push"}])eq(await runProduction({env:{...env,...patch},makeRuntime}),{code:"PRODUCTION_GATE_REJECTED",exit:1});
