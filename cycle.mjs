@@ -1,3 +1,4 @@
+import {recordHealth} from "./health.mjs";
 // v0.15 LAB — 2026-11-17 Europe/Rome. Dependency-injected cycle, no scheduler.
 import {runOnce} from "./coordinator.mjs";
 import {reserve,record,nextAllowed} from "./state.mjs";
@@ -19,7 +20,7 @@ async function runCycle({store,probe,deliver,clock}){
  if(first.state.delivery!=null)return "DELIVERY_REVIEW_REQUIRED";
  let fresh=false;
  const status=await runOnce({store,clock,reserve,nextAllowed,probe:async()=>{const r=await probe();fresh=completeReport(r);return r;},
- record:(s,t,r)=>{const next=record(s,t,r);return fresh?reconcileFresh(next,t,r):next;}});
+ record:(s,t,r)=>{const next=recordHealth(record(s,t,r),t,r,fresh);return fresh?reconcileFresh(next,t,r):next;}});
  if(status!=="RECORDED")return status;
  if(!fresh)return "INCOMPLETE_NO_SEND";
  return dispatchPending({store,clock,deliver});
