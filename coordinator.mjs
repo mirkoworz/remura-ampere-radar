@@ -1,7 +1,8 @@
-// v0.5 LAB — 2026-11-17 CET — dependency-injected orchestration, no live I/O.
+// v0.6 LAB — 2026-11-17 CET — dependency-injected orchestration, no live I/O.
 async function runOnce({store,probe,clock,reserve,record,nextAllowed}){
   const item=await store.read();
   if(!item||typeof item.version!=="string"||!item.version||!item.state||!Array.isArray(item.state.pending))return "STATE_INVALID";
+  if(item.state.enabled!==true)return "DISABLED";
   const now=clock();
   if(!nextAllowed(item.state,now))return "NOT_DUE";
   const reserved=reserve(item.state,now);
@@ -9,9 +10,13 @@ async function runOnce({store,probe,clock,reserve,record,nextAllowed}){
   let version;
   try{version=await store.compareAndSwap(item.version,reserved);}catch{return "RESERVATION_UNCERTAIN";}
   if(typeof version!=="string"||!version||version===item.version)return "RESERVATION_UNCERTAIN";
+  // Read the acknowledged durable revision; do not probe on mismatch.
+  let confirmed;
+  try{confirmed=await store.read();}catch{return "RESERVATION_UNCERTAIN";}
+  if(!confirmed||confirmed.version!==version||confirmed.state?.enabled!==true||confirmed.state.nextAt!==reserved.nextAt)return "RESERVATION_UNCERTAIN";
   let result;
   try{result=await probe();}catch{result={error:"UNKNOWN"};}
-  const finished=record(reserved,Math.max(now,clock()),result);
+  const finished=record(confirmed.state,Math.max(now,clock()),result);
   try{
     const saved=await store.compareAndSwap(version,finished);
     if(typeof saved!=="string"||!saved||saved===version)return "RESULT_UNCERTAIN";
@@ -22,7 +27,7 @@ async function testCoordinator(){
   let count=0;
   const eq=(a,b)=>{if(a!==b)throw Error("coordinator assertion "+count);count++;};
   const make=({failAt=0,ambiguous=false,invalid=false}={})=>{
-    let v=1, calls=0, writes=0, state={nextAt:0,pending:[]};
+    let v=1, calls=0, writes=0, state={enabled:true,nextAt:0,pending:[]};
     const env={
       store:{read:async()=>invalid?null:{version:String(v),state:{...state}},compareAndSwap:async(expected,next)=>{
         writes++;if(expected!==String(v))return null;
@@ -42,6 +47,8 @@ async function testCoordinator(){
   x=make({invalid:true});eq(await runOnce(x.env),"STATE_INVALID");eq(x.calls(),0);
   x=make();const both=await Promise.all([runOnce(x.env),runOnce(x.env)]);eq(x.calls(),1);eq(both.filter(y=>y==="RECORDED").length,1);
   x=make();x.env.probe=async()=>{throw Error("simulated timeout");};eq(await runOnce(x.env),"RECORDED");eq(x.state().error,"UNKNOWN");
+  x=make();x.env.store.read=async()=>({version:'1',state:{enabled:false,nextAt:0,pending:[]}});eq(await runOnce(x.env),'DISABLED');eq(x.calls(),0);
+  x=make();const read=x.env.store.read;let reads=0;x.env.store.read=async()=>{if(++reads===2)throw Error('lost read');return read();};eq(await runOnce(x.env),'RESERVATION_UNCERTAIN');eq(x.calls(),0);
   return count;
 }
 export {runOnce,testCoordinator};
