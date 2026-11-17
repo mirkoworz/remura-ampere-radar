@@ -1,0 +1,58 @@
+# v0.10 LAB — 17 November 2026 — manual one-time pairing only.
+name: Radar Telegram pairing LAB
+on:
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: radar-telegram-pairing-lab
+  cancel-in-progress: false
+jobs:
+  pair:
+    if: github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Pair private chat without logging identifiers
+        shell: bash
+        env:
+          RADAR_TELEGRAM_TOKEN: ${{ secrets.RADAR_TELEGRAM_TOKEN }}
+          RADAR_PAIR_CODE: ${{ secrets.RADAR_PAIR_CODE }}
+        run: |
+          node --input-type=module <<'NODE'
+          function findRecipient(updates,code,now){
+           if(!Array.isArray(updates)||typeof code!=="string"||!/^[A-Za-z0-9_-]{16,64}$/.test(code)||!Number.isSafeInteger(now))return null;
+           const ids=new Set();
+           for(const u of updates){
+            const m=u?.message;
+            if(!m||m.text!=="/pair "+code||m.chat?.type!=="private"||m.from?.is_bot!==false||m.forward_origin||m.from?.id!==m.chat?.id||!Number.isSafeInteger(m.chat.id)||m.chat.id<=0||!Number.isSafeInteger(m.date)||m.date<now-900||m.date>now+30)continue;
+            ids.add(m.chat.id);
+           }
+           return ids.size===1?[...ids][0]:null;
+          }
+          async function pair({token,code,now,request}){
+           if(!/^\d{5,20}:[A-Za-z0-9_-]{20,100}$/.test(token??"")||!/^[A-Za-z0-9_-]{16,64}$/.test(code??""))return "PAIR_CONFIG_INVALID";
+           try{
+            const updates=await request("getUpdates",{limit:100,timeout:0});
+            if(updates?.ok!==true||!Array.isArray(updates.result))return "PAIR_READ_FAILED";
+            const chat=findRecipient(updates.result,code,now);
+            if(chat===null)return "PAIR_NOT_FOUND_OR_AMBIGUOUS";
+            const r=await request("sendMessage",{chat_id:chat,text:"REMURA Ampere Radar — abbinamento di prova riuscito.\nCHAT_ID: "+chat+"\nCopia soltanto il numero in GitHub Actions Secrets come RADAR_TELEGRAM_CHAT_ID. Nessun monitoraggio attivo.",allow_paid_broadcast:false});
+            return r?.ok===true&&r.result?.chat?.id===chat&&r.result?.chat?.type==="private"&&Number.isSafeInteger(r.result?.message_id)?"PAIR_OK":"PAIR_DELIVERY_UNCERTAIN";
+           }catch{return "PAIR_REQUEST_FAILED";}
+          }
+          
+          const token=process.env.RADAR_TELEGRAM_TOKEN;
+          const code=process.env.RADAR_PAIR_CODE;
+          async function request(method,body){
+           if(!["getUpdates","sendMessage"].includes(method))throw Error("blocked");
+           const response=await fetch("https://api.telegram.org/bot"+token+"/"+method,{method:"POST",redirect:"error",signal:AbortSignal.timeout(15000),headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+           if(response.status!==200){await response.body?.cancel();throw Error("request failed");}
+           const reader=response.body.getReader();
+           const chunks=[];let size=0;
+           try{while(true){const x=await reader.read();if(x.done)break;size+=x.value.byteLength;if(size>262144)throw Error("too large");chunks.push(Buffer.from(x.value));}
+           return JSON.parse(Buffer.concat(chunks).toString("utf8"));}
+           finally{try{await reader.cancel();reader.releaseLock()}catch{}}
+          }
+          const result=await pair({token,code,now:Math.floor(Date.now()/1000),request});
+          console.log(result);if(result!=="PAIR_OK")process.exitCode=1;
+          NODE
