@@ -30,3 +30,4 @@ jobs:
           node cycle-test.mjs
           node runtime-test.mjs
           node release-test.mjs
+          node operations-test.mjs
