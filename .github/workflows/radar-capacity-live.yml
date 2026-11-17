@@ -1,0 +1,114 @@
+# REMURA Ampere Radar v0.32 — 17 November 2026, Europe/Rome
+# Operator-authorized release; two gates: repository variable and private enabled state.
+name: Radar capacity live
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [RUN, ACTIVATE, MAINTAIN, HEARTBEAT]
+        required: true
+      confirm:
+        type: string
+        required: true
+      expected_sha:
+        type: string
+        required: false
+      operation:
+        type: choice
+        options: [STOP, RESOLVE_STOPPED]
+        required: false
+        default: STOP
+      decision:
+        type: choice
+        options: [UNKNOWN_SUPPRESS, CONFIRMED_DELIVERED, KNOWN_NOT_SENT]
+        required: false
+        default: UNKNOWN_SUPPRESS
+      intent_key:
+        type: string
+        required: false
+      intent_observed:
+        type: string
+        required: false
+      intent_started:
+        type: string
+        required: false
+  schedule:
+    - cron: '7,37 * * * *'
+    - cron: '19 */2 * * *'
+permissions: {}
+concurrency:
+  group: radar-global
+  cancel-in-progress: false
+jobs:
+  gated:
+    if: >-
+      github.repository == 'mirkoworz/remura-ampere-radar' &&
+      github.ref == 'refs/heads/main' && github.run_attempt == 1 &&
+      ((github.event_name == 'workflow_dispatch' &&
+      github.actor == 'mirkoworz' && github.triggering_actor == 'mirkoworz' &&
+      ((inputs.mode == 'RUN' && inputs.confirm == 'LIVE_CAPACITY_ONLY' && vars.RADAR_OPERATOR_ENABLE == 'ENABLED') ||
+       (inputs.mode == 'ACTIVATE' && inputs.confirm == 'ACTIVATE_INITIAL_STATE' && vars.RADAR_OPERATOR_ENABLE == 'ENABLED') ||
+       (inputs.mode == 'MAINTAIN' && inputs.confirm == 'STOP_OR_RESOLVE_ONLY' && vars.RADAR_OPERATOR_ENABLE != 'ENABLED') ||
+       (inputs.mode == 'HEARTBEAT' && inputs.confirm == 'READ_HEALTH_ONLY'))) ||
+       (github.event_name == 'schedule' && vars.RADAR_OPERATOR_ENABLE == 'ENABLED'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Acquire immutable reviewed code (no secrets)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_TERMINAL_PROMPT=0
+          expected=c3195b841043880fb5aaac5671c5eff1226a3347
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
+          git init lab
+          cd lab
+          git -c credential.helper= fetch --depth=1 https://github.com/mirkoworz/remura-ampere-radar.git "$expected"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$expected"
+          node -e 'if (+process.versions.node.split(".")[0] < 22) process.exit(1)'
+          node --check operations-entry.mjs
+      - name: Run capacity only
+        if: (github.event_name == 'workflow_dispatch' && inputs.mode == 'RUN') || (github.event_name == 'schedule' && github.event.schedule == '7,37 * * * *')
+        env:
+          RADAR_MODE: RUN
+          RADAR_RUNTIME_GATE: LIVE_CAPACITY_ONLY
+          RADAR_OPERATOR_ENABLE: ${{ vars.RADAR_OPERATOR_ENABLE }}
+          RADAR_STATE_TOKEN: ${{ secrets.RADAR_STATE_TOKEN }}
+          RADAR_OCI_TENANCY: ${{ secrets.RADAR_OCI_TENANCY }}
+          RADAR_OCI_USER: ${{ secrets.RADAR_OCI_USER }}
+          RADAR_OCI_FINGERPRINT: ${{ secrets.RADAR_OCI_FINGERPRINT }}
+          RADAR_OCI_AD: ${{ secrets.RADAR_OCI_AD }}
+          RADAR_OCI_PRIVATE_KEY: ${{ secrets.RADAR_OCI_PRIVATE_KEY }}
+          RADAR_TELEGRAM_TOKEN: ${{ secrets.RADAR_TELEGRAM_TOKEN }}
+          RADAR_TELEGRAM_CHAT_ID: ${{ secrets.RADAR_TELEGRAM_CHAT_ID }}
+        run: cd lab && node operations-entry.mjs
+      - name: Initial activation only
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'ACTIVATE'
+        env:
+          RADAR_MODE: ACTIVATE
+          RADAR_OPERATOR_ENABLE: ${{ vars.RADAR_OPERATOR_ENABLE }}
+          RADAR_ACTIVATION_GATE: ${{ inputs.confirm }}
+          RADAR_EXPECTED_SHA: ${{ inputs.expected_sha }}
+          RADAR_STATE_TOKEN: ${{ secrets.RADAR_STATE_TOKEN }}
+        run: cd lab && node operations-entry.mjs
+      - name: Stop or reconcile while stopped
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'MAINTAIN'
+        env:
+          RADAR_MODE: MAINTAIN
+          RADAR_MAINTENANCE_GATE: ${{ inputs.confirm }}
+          RADAR_EXPECTED_SHA: ${{ inputs.expected_sha }}
+          RADAR_OPERATION: ${{ inputs.operation }}
+          RADAR_DECISION: ${{ inputs.decision }}
+          RADAR_INTENT_KEY: ${{ inputs.intent_key }}
+          RADAR_INTENT_OBSERVED: ${{ inputs.intent_observed }}
+          RADAR_INTENT_STARTED: ${{ inputs.intent_started }}
+          RADAR_STATE_TOKEN: ${{ secrets.RADAR_STATE_TOKEN }}
+        run: cd lab && node operations-entry.mjs
+      - name: Read heartbeat
+        if: (github.event_name == 'workflow_dispatch' && inputs.mode == 'HEARTBEAT') || (github.event_name == 'schedule' && github.event.schedule == '19 */2 * * *')
+        env:
+          RADAR_MODE: HEARTBEAT
+          RADAR_STATE_TOKEN: ${{ secrets.RADAR_STATE_TOKEN }}
+        run: cd lab && node operations-entry.mjs
