@@ -33,3 +33,4 @@ jobs:
           node operations-test.mjs
           node --check operations-entry.mjs
           node activation-test.mjs
+          node cloudflare/radar-cron-test.mjs
