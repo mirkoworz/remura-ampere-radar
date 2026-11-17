@@ -1,4 +1,4 @@
-# REMURA Ampere Radar v0.32 — 17 November 2026, Europe/Rome
+# REMURA Ampere Radar v0.33 — 17 November 2026, Europe/Rome
 # Operator-authorized release; two gates: repository variable and private enabled state.
 name: Radar capacity live
 on:
@@ -34,7 +34,7 @@ on:
         type: string
         required: false
   schedule:
-    - cron: '7,37 * * * *'
+    - cron: '11,41 * * * *'
     - cron: '19 */2 * * *'
 permissions: {}
 concurrency:
@@ -70,7 +70,7 @@ jobs:
           node -e 'if (+process.versions.node.split(".")[0] < 22) process.exit(1)'
           node --check operations-entry.mjs
       - name: Run capacity only
-        if: (github.event_name == 'workflow_dispatch' && inputs.mode == 'RUN') || (github.event_name == 'schedule' && github.event.schedule == '7,37 * * * *')
+        if: (github.event_name == 'workflow_dispatch' && inputs.mode == 'RUN') || (github.event_name == 'schedule' && github.event.schedule == '11,41 * * * *')
         env:
           RADAR_MODE: RUN
           RADAR_RUNTIME_GATE: LIVE_CAPACITY_ONLY
