@@ -1,0 +1,49 @@
+name: Radar integrated live LAB
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Enter INTEGRATED_LAB_ONCE (one capacity report and one labelled Telegram test)'
+        required: true
+        type: string
+permissions: {}
+concurrency:
+  group: radar-global
+  cancel-in-progress: false
+jobs:
+  isolated-integration:
+    if: github.repository == 'mirkoworz/remura-ampere-radar' && github.ref == 'refs/heads/main' && github.actor == 'mirkoworz' && github.triggering_actor == 'mirkoworz' && github.run_attempt == 1 && inputs.confirm == 'INTEGRATED_LAB_ONCE'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Verify pinned code and run offline regression without secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_TERMINAL_PROMPT=0
+          expected=a18a21573dc702db9c571802bb72a4ce87f8b05e
+          git init lab
+          cd lab
+          git -c credential.helper= fetch --depth=1 https://github.com/mirkoworz/remura-ampere-radar.git "$expected"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$expected"
+          node -e 'if (+process.versions.node.split(".")[0] < 22) process.exit(1)'
+          node --check integrated-live-lab.mjs
+          node cycle-test.mjs
+      - name: One isolated live report, private CAS and labelled Telegram test
+        shell: bash
+        env:
+          RADAR_LAB_GATE: INTEGRATED_LAB_ONCE
+          RADAR_STATE_TOKEN: ${{ secrets.RADAR_STATE_TOKEN }}
+          RADAR_OCI_TENANCY: ${{ secrets.RADAR_OCI_TENANCY }}
+          RADAR_OCI_USER: ${{ secrets.RADAR_OCI_USER }}
+          RADAR_OCI_FINGERPRINT: ${{ secrets.RADAR_OCI_FINGERPRINT }}
+          RADAR_OCI_AD: ${{ secrets.RADAR_OCI_AD }}
+          RADAR_OCI_PRIVATE_KEY: ${{ secrets.RADAR_OCI_PRIVATE_KEY }}
+          RADAR_TELEGRAM_TOKEN: ${{ secrets.RADAR_TELEGRAM_TOKEN }}
+          RADAR_TELEGRAM_CHAT_ID: ${{ secrets.RADAR_TELEGRAM_CHAT_ID }}
+        run: |
+          set -euo pipefail
+          cd lab
+          test "$(git rev-parse HEAD)" = a18a21573dc702db9c571802bb72a4ce87f8b05e
+          node integrated-live-lab.mjs
