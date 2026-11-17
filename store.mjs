@@ -1,6 +1,7 @@
+import {validHealth} from "./health.mjs";
 // v0.12 LAB — 2026-11-17 CET — injected transport only; no credentials or live requests.
 function validateState(s){
- return !!s&&s.schema===1&&typeof s.enabled==="boolean"&&Number.isSafeInteger(s.revision)&&s.revision>=0&&s.revision<Number.MAX_SAFE_INTEGER&&Number.isSafeInteger(s.nextAt)&&s.nextAt>=0&&(s.last===null||["2/12","1/6"].includes(s.last))&&Array.isArray(s.pending)&&s.pending.length<=2&&s.pending.every(p=>p&&["2/12","1/6"].includes(p.key)&&Number.isSafeInteger(p.observedAt)&&p.observedAt>=0)&&new Set(s.pending.map(p=>p.key)).size===s.pending.length&&(s.delivery==null||(typeof s.delivery==='object'&&Number.isSafeInteger(s.delivery.startedAt)&&s.delivery.startedAt>=s.delivery.observedAt&&s.pending.some(p=>p.key===s.delivery.key&&p.observedAt===s.delivery.observedAt)));
+ return !!s&&validHealth(s.health)&&s.schema===1&&typeof s.enabled==="boolean"&&Number.isSafeInteger(s.revision)&&s.revision>=0&&s.revision<Number.MAX_SAFE_INTEGER&&Number.isSafeInteger(s.nextAt)&&s.nextAt>=0&&(s.last===null||["2/12","1/6"].includes(s.last))&&Array.isArray(s.pending)&&s.pending.length<=2&&s.pending.every(p=>p&&["2/12","1/6"].includes(p.key)&&Number.isSafeInteger(p.observedAt)&&p.observedAt>=0)&&new Set(s.pending.map(p=>p.key)).size===s.pending.length&&(s.delivery==null||(typeof s.delivery==='object'&&Number.isSafeInteger(s.delivery.startedAt)&&s.delivery.startedAt>=s.delivery.observedAt&&s.pending.some(p=>p.key===s.delivery.key&&p.observedAt===s.delivery.observedAt)));
 }
 function makeStore({request,encode,decode,repository}){
  if(!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)||repository.split("/").some(x=>x==="."||x===".."))throw Error("invalid repo");
@@ -19,6 +20,7 @@ function makeStore({request,encode,decode,repository}){
  async compareAndSwap(expected,next){
    if(!previous||!sha(expected)||expected!==previous.version||!validateState(next)||next.revision!==previous.state.revision||next.enabled!==previous.state.enabled||!next.enabled)throw Error("write blocked");
    const updated={schema:1,enabled:next.enabled,revision:next.revision+1,nextAt:next.nextAt,last:next.last,pending:next.pending.map(p=>({key:p.key,observedAt:p.observedAt}))};
+   if(next.health!==undefined)updated.health=next.health===null?null:{lastProbeAt:next.health.lastProbeAt,lastGoodAt:next.health.lastGoodAt,failures:next.health.failures,error:next.health.error};
    if(next.delivery!==undefined)updated.delivery=next.delivery===null?null:{key:next.delivery.key,observedAt:next.delivery.observedAt,startedAt:next.delivery.startedAt};
    if(!validateState(updated))throw Error("revision invalid");
    // Consume the cached version before attempting the write, even on uncertainty.
