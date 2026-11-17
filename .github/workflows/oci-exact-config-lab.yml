@@ -1,0 +1,65 @@
+name: Radar OCI exact config LAB
+on:
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: radar-global
+  cancel-in-progress: false
+jobs:
+  compare:
+    if: github.repository == 'mirkoworz/remura-ampere-radar' && github.ref == 'refs/heads/main' && github.actor == 'mirkoworz' && github.triggering_actor == 'mirkoworz'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Compare registered API key config locally without network
+        shell: bash
+        env:
+          RADAR_OCI_CONFIG_CHECK: ${{ secrets.RADAR_OCI_CONFIG_CHECK }}
+          RADAR_OCI_TENANCY: ${{ secrets.RADAR_OCI_TENANCY }}
+          RADAR_OCI_USER: ${{ secrets.RADAR_OCI_USER }}
+          RADAR_OCI_FINGERPRINT: ${{ secrets.RADAR_OCI_FINGERPRINT }}
+          RADAR_OCI_AD: ${{ secrets.RADAR_OCI_AD }}
+          RADAR_OCI_PRIVATE_KEY: ${{ secrets.RADAR_OCI_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'JS'
+          import {createPrivateKey,createPublicKey,createHash,sign,verify} from "node:crypto";
+          let passed=true;
+          const report=(name,ok)=>{console.log("EXACT_"+name+"_"+(ok?"OK":"FAIL"));if(!ok)passed=false;};
+          const env=process.env;
+          const raw=env.RADAR_OCI_CONFIG_CHECK??"";
+          const values=Object.create(null);
+          try{
+            if(!raw||raw.length>8192||raw.includes("PRIVATE KEY-----"))throw Error("config");
+            let section=false;
+            for(const original of raw.split(/\r?\n/)){
+              const line=original.trim();
+              if(!line||line.startsWith("#"))continue;
+              if(line==="[DEFAULT]"&&!section){section=true;continue;}
+              if(!section)throw Error("section");
+              const m=/^(user|fingerprint|tenancy|region|key_file)=(.*)$/.exec(line);
+              if(!m||Object.hasOwn(values,m[1]))throw Error("field");
+              values[m[1]]=m[2].trim();
+            }
+            if(!section||!["user","fingerprint","tenancy","region"].every(k=>values[k]))throw Error("missing");
+          }catch{console.log("EXACT_CONFIG_PARSE_FAIL");process.exit(1);}
+          report("CONFIG_PARSE",true);
+          report("USER_MATCH",/^ocid1\.user\.oc1\.\.[a-z0-9]{10,100}$/.test(values.user)&&values.user===env.RADAR_OCI_USER);
+          report("TENANCY_MATCH",/^ocid1\.tenancy\.oc1\.\.[a-z0-9]{10,100}$/.test(values.tenancy)&&values.tenancy===env.RADAR_OCI_TENANCY);
+          report("FINGERPRINT_MATCH",/^([a-f0-9]{2}:){15}[a-f0-9]{2}$/i.test(values.fingerprint)&&values.fingerprint.toLowerCase()===(env.RADAR_OCI_FINGERPRINT??"").toLowerCase());
+          report("MILAN_AD",values.region==="eu-milan-1"&&/^[A-Za-z0-9]{4}:EU-MILAN-1-AD-1$/.test(env.RADAR_OCI_AD??""));
+          try{
+            const pem=env.RADAR_OCI_PRIVATE_KEY??"";
+            if(!pem||pem.length>16384)throw Error("key");
+            const key=createPrivateKey(pem);
+            if(key.asymmetricKeyType!=="rsa"||key.asymmetricKeyDetails.modulusLength<2048)throw Error("rsa");
+            const pub=createPublicKey(key);
+            report("RSA_KEY",true);
+            const fp=createHash("md5").update(pub.export({type:"spki",format:"der"})).digest("hex").match(/../g).join(":");
+            report("REGISTERED_KEY_MATCH",fp===values.fingerprint.toLowerCase());
+            const message=Buffer.from("REMURA local comparison synthetic challenge");
+            report("SIGN_VERIFY",verify("RSA-SHA256",message,pub,sign("RSA-SHA256",message,key)));
+          }catch{report("CRYPTO",false);}
+          console.log(passed?"EXACT_ALL_OK_NO_NETWORK":"EXACT_STOP_NO_NETWORK");
+          if(!passed)process.exitCode=1;
+          JS
