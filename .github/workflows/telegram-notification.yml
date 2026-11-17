@@ -1,0 +1,45 @@
+# v0.11 LAB — 2026-11-17 — manual notification test only.
+name: Radar Telegram notification LAB
+on:
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: radar-telegram-notification-lab
+  cancel-in-progress: false
+jobs:
+  notify:
+    if: github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner && github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Send explicit test message to configured private chat
+        shell: bash
+        env:
+          RADAR_TELEGRAM_TOKEN: ${{ secrets.RADAR_TELEGRAM_TOKEN }}
+          RADAR_TELEGRAM_CHAT_ID: ${{ secrets.RADAR_TELEGRAM_CHAT_ID }}
+        run: |
+          node --input-type=module <<'NODE'
+          async function notifyTest({token,chatId,request,now}){
+           if(!/^\d{5,20}:[A-Za-z0-9_-]{20,100}$/.test(token??""))return "TOKEN_INVALID";
+           if(!/^[1-9]\d{0,15}$/.test(chatId??"")||!Number.isSafeInteger(Number(chatId)))return "CHAT_ID_INVALID";
+           try{
+           const at=new Date(now).toLocaleString("it-IT",{timeZone:"Europe/Rome",hour12:false});
+           const response=await request({chat_id:chatId,text:"REMURA Ampere Radar v0.11 LAB\n✅ TEST NOTIFICA — "+at+" (ora italiana)\nCollegamento Telegram operativo. Non è una segnalazione di capacità Ampere. Monitoraggio automatico NON attivo.",allow_paid_broadcast:false,link_preview_options:{is_disabled:true}});
+           if(response.status===429)return "NOTIFY_RATE_LIMIT";
+           if(response.status!==200)return "NOTIFY_FAILED";
+           const r=response.body;
+           return r?.ok===true&&r.result?.chat?.type==="private"&&String(r.result.chat.id)===chatId&&Number.isSafeInteger(r.result.message_id)&&r.result.message_id>0?"NOTIFY_TEST_OK":"NOTIFY_ACK_UNCERTAIN";
+           }catch{return "NOTIFY_UNCERTAIN";}
+          }
+          const token=(process.env.RADAR_TELEGRAM_TOKEN??"").trim();
+          const chatId=(process.env.RADAR_TELEGRAM_CHAT_ID??"").trim();
+          async function request(body){
+           const r=await fetch("https://api.telegram.org/bot"+token+"/sendMessage",{method:"POST",redirect:"error",signal:AbortSignal.timeout(15000),headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+           if(r.status!==200){await r.body?.cancel();return {status:r.status,body:null};}
+           const reader=r.body.getReader();let size=0;const chunks=[];
+           try{while(true){const p=await reader.read();if(p.done)break;size+=p.value.byteLength;if(size>65536)throw Error("response too large");chunks.push(Buffer.from(p.value));}return {status:200,body:JSON.parse(Buffer.concat(chunks).toString("utf8"))};}
+           finally{try{await reader.cancel();reader.releaseLock();}catch{}}
+          }
+          const result=await notifyTest({token,chatId,request,now:Date.now()});
+          console.log(result);if(result!=="NOTIFY_TEST_OK")process.exitCode=1;
+          NODE
