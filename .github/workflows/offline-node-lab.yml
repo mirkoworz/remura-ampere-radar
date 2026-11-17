@@ -28,3 +28,4 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           node -e 'if (+process.versions.node.split(".")[0] < 22) process.exit(1)'
           node cycle-test.mjs
+          node runtime-test.mjs
