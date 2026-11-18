@@ -1,11 +1,13 @@
-// REMURA Ampere Radar v0.34 LAB — 17 November 2026, Europe/Rome.
+// REMURA Ampere Radar v0.35 LAB — 18 November 2026, Europe/Rome.
 // Dedicated scheduled dispatcher; no public HTTP trigger, no Oracle/Telegram credentials.
 export const CRON="16,46 * * * *";
 const URL="https://api.github.com/repos/mirkoworz/remura-ampere-radar/actions/workflows/421668967/dispatches";
 export async function dispatchRadar({controller,env,fetchImpl=fetch,now=Date.now()}){
  if(env.RADAR_CRON_ENABLE!=="ENABLED")return "CRON_DISABLED";
  const t=controller?.scheduledTime;
- if(controller?.cron!==CRON||!Number.isSafeInteger(t)||t<0||t%60000!==0||![16,46].includes(new Date(t).getUTCMinutes())||!Number.isSafeInteger(now)||now<t||now-t>600000)return "CRON_SLOT_REJECTED";
+ if(typeof controller?.cron!=="string"||controller.cron.trim().replace(/\s+/g," ")!==CRON)return "CRON_SLOT_RULE_REJECTED";
+ if(!Number.isSafeInteger(t)||t<0||t>8640000000000000||![16,46].includes(new Date(t).getUTCMinutes()))return "CRON_SLOT_TIME_REJECTED";
+ if(!Number.isSafeInteger(now)||now<0||now>8640000000000000||now-t< -5000||now-t>600000)return "CRON_SLOT_CLOCK_REJECTED";
  const token=env.RADAR_DISPATCH_TOKEN;
  if(typeof token!=="string"||!/^github_pat_[A-Za-z0-9_]{20,500}$/.test(token))return "CRON_CONFIG_REVIEW";
  try{
