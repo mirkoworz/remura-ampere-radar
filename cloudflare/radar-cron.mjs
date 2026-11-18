@@ -15,10 +15,11 @@ export async function dispatchRadar({controller,env,fetchImpl=(request)=>globalT
  try{
   let request;
   try{
-   request=new Request(URL,{method:"POST",redirect:"error",signal:abort.signal,headers:{Authorization:"Bearer "+token,Accept:"application/vnd.github+json","Content-Type":"application/json","X-GitHub-Api-Version":"2026-03-10","User-Agent":"REMURA-Ampere-Radar"},body:JSON.stringify({ref:"main",inputs:{mode:"RUN",confirm:"LIVE_CAPACITY_ONLY"}})});
+   request=new Request(URL,{method:"POST",redirect:"manual",signal:abort.signal,headers:{Authorization:"Bearer "+token,Accept:"application/vnd.github+json","Content-Type":"application/json","X-GitHub-Api-Version":"2026-03-10","User-Agent":"REMURA-Ampere-Radar"},body:JSON.stringify({ref:"main",inputs:{mode:"RUN",confirm:"LIVE_CAPACITY_ONLY"}})});
   }catch{return "CRON_REQUEST_BUILD_ERROR";}
   const response=await fetchImpl(request);
   const status=response.status;try{await response.body?.cancel()}catch{}
+  if(status>=300&&status<400)return "CRON_FETCH_REDIRECT_ERROR";
   if(status===200||status===204)return "CRON_DISPATCH_ACCEPTED";
   if(status===401||status===403)return "CRON_AUTH_REVIEW";
   if(status===429)return "CRON_RATE_LIMIT";
