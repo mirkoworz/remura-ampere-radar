@@ -1,4 +1,4 @@
-// v0.35 LAB — synthetic tests; never contacts GitHub or Cloudflare.
+// v0.36 LAB — synthetic tests; never contacts GitHub or Cloudflare.
 import assert from "node:assert/strict";
 import worker,{dispatchRadar,CRON} from "./radar-cron.mjs";
 let n=0;const eq=(a,b)=>{assert.deepEqual(a,b);n++};
@@ -16,5 +16,5 @@ eq(await run({controller:{...controller,scheduledTime:t+59999},now:t+60000}),"CR
 eq(await run({now:t+600000}),"CRON_DISPATCH_ACCEPTED");
 const before=calls;
 for(const [patch,code] of [[{env:{}},"CRON_DISABLED"],[{env:{...env,RADAR_DISPATCH_TOKEN:"bad"}},"CRON_CONFIG_REVIEW"],[{controller:{...controller,cron:"* * * * *"}},"CRON_SLOT_RULE_REJECTED"],[{controller:{...controller,scheduledTime:t+60000}},"CRON_SLOT_TIME_REJECTED"],[{controller:{...controller,scheduledTime:NaN}},"CRON_SLOT_TIME_REJECTED"],[{controller:{...controller,scheduledTime:8640000000000001}},"CRON_SLOT_TIME_REJECTED"],[{now:t-5001},"CRON_SLOT_CLOCK_REJECTED"],[{now:t+600001},"CRON_SLOT_CLOCK_REJECTED"],[{now:NaN},"CRON_SLOT_CLOCK_REJECTED"]])eq(await run(patch),code);
-eq(calls,before);eq(await run({fetchImpl:async()=>{throw Error("synthetic secret");}}),"CRON_DISPATCH_UNCERTAIN");eq(worker.fetch().status,404);let noRetry=0;await worker.scheduled({...controller,noRetry:()=>noRetry++},{RADAR_CRON_ENABLE:"OFF"});eq(noRetry,1);
+eq(calls,before);eq(await run({fetchImpl:async()=>{throw Error("synthetic secret");}}),"CRON_FETCH_UNCERTAIN");eq(await run({fetchImpl:async()=>{throw new TypeError("synthetic secret");}}),"CRON_FETCH_TYPE_ERROR");eq(await run({fetchImpl:async(url,options)=>{eq(options.signal.aborted,false);throw Error("simulated network");}}),"CRON_FETCH_UNCERTAIN");eq(worker.fetch().status,404);let noRetry=0;await worker.scheduled({...controller,noRetry:()=>noRetry++},{RADAR_CRON_ENABLE:"OFF"});eq(noRetry,1);
 console.log("CLOUDFLARE_CRON_LAB_OK checks="+n);
