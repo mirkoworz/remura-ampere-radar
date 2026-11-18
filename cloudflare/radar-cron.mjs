@@ -1,8 +1,8 @@
-// REMURA Ampere Radar v0.36 LAB — 18 November 2026, Europe/Rome.
+// REMURA Ampere Radar v0.37 LAB — 18 November 2026, Europe/Rome.
 // Dedicated scheduled dispatcher; no public HTTP trigger, no Oracle/Telegram credentials.
 export const CRON="16,46 * * * *";
 const URL="https://api.github.com/repos/mirkoworz/remura-ampere-radar/actions/workflows/421668967/dispatches";
-export async function dispatchRadar({controller,env,fetchImpl=fetch,now=Date.now()}){
+export async function dispatchRadar({controller,env,fetchImpl=(request)=>globalThis.fetch(request),now=Date.now()}){
  if(env.RADAR_CRON_ENABLE!=="ENABLED")return "CRON_DISABLED";
  const t=controller?.scheduledTime;
  if(typeof controller?.cron!=="string"||controller.cron.trim().replace(/\s+/g," ")!==CRON)return "CRON_SLOT_RULE_REJECTED";
@@ -13,7 +13,11 @@ export async function dispatchRadar({controller,env,fetchImpl=fetch,now=Date.now
  let abort,timer;
  try{abort=new AbortController();timer=setTimeout(()=>abort.abort(),15000);}catch{return "CRON_TIMER_REVIEW";}
  try{
-  const response=await fetchImpl(URL,{method:"POST",redirect:"error",signal:abort.signal,headers:{Authorization:"Bearer "+token,Accept:"application/vnd.github+json","Content-Type":"application/json","X-GitHub-Api-Version":"2026-03-10","User-Agent":"REMURA-Ampere-Radar"},body:JSON.stringify({ref:"main",inputs:{mode:"RUN",confirm:"LIVE_CAPACITY_ONLY"}})});
+  let request;
+  try{
+   request=new Request(URL,{method:"POST",redirect:"error",signal:abort.signal,headers:{Authorization:"Bearer "+token,Accept:"application/vnd.github+json","Content-Type":"application/json","X-GitHub-Api-Version":"2026-03-10","User-Agent":"REMURA-Ampere-Radar"},body:JSON.stringify({ref:"main",inputs:{mode:"RUN",confirm:"LIVE_CAPACITY_ONLY"}})});
+  }catch{return "CRON_REQUEST_BUILD_ERROR";}
+  const response=await fetchImpl(request);
   const status=response.status;try{await response.body?.cancel()}catch{}
   if(status===200||status===204)return "CRON_DISPATCH_ACCEPTED";
   if(status===401||status===403)return "CRON_AUTH_REVIEW";
@@ -21,7 +25,13 @@ export async function dispatchRadar({controller,env,fetchImpl=fetch,now=Date.now
   return "CRON_DISPATCH_REVIEW";
  }catch(e){
   if(abort.signal.aborted)return "CRON_FETCH_TIMEOUT";
-  if(e?.name==="TypeError")return "CRON_FETCH_TYPE_ERROR";
+  if(e?.name==="TypeError"){
+   const message=typeof e.message==="string"?e.message:"";
+   if(/illegal invocation|incorrect this reference/i.test(message))return "CRON_FETCH_RECEIVER_ERROR";
+   if(/redirect/i.test(message))return "CRON_FETCH_REDIRECT_ERROR";
+   if(/network|connection|dns|tls|ssl|certificate|fetch failed|failed to fetch/i.test(message))return "CRON_FETCH_NETWORK_ERROR";
+   return "CRON_FETCH_TYPE_OTHER";
+  }
   return "CRON_FETCH_UNCERTAIN";
  }finally{clearTimeout(timer);}
 }
