@@ -6,8 +6,8 @@ const t=Date.UTC(2026,10,17,22,16),controller={cron:CRON,scheduledTime:t},env={R
 let calls=0,last;
 const run=async(patch={},status=204)=>dispatchRadar({controller,env,now:t+1000,fetchImpl:async(request)=>{calls++;last=request;return {status};},...patch});
 eq(await run(),"CRON_DISPATCH_ACCEPTED");eq(calls,1);
-eq(last.url,"https://api.github.com/repos/mirkoworz/remura-ampere-radar/actions/workflows/421668967/dispatches");eq(last.method,"POST");eq(last.redirect,"error");eq(await last.json(),{ref:"main",inputs:{mode:"RUN",confirm:"LIVE_CAPACITY_ONLY"}});eq(last.headers.get("Authorization"),"Bearer "+env.RADAR_DISPATCH_TOKEN);
-for(const [status,code] of [[200,"CRON_DISPATCH_ACCEPTED"],[401,"CRON_AUTH_REVIEW"],[403,"CRON_AUTH_REVIEW"],[429,"CRON_RATE_LIMIT"],[404,"CRON_DISPATCH_REVIEW"],[500,"CRON_DISPATCH_REVIEW"],[302,"CRON_DISPATCH_REVIEW"]])eq(await run({},status),code);
+eq(last.url,"https://api.github.com/repos/mirkoworz/remura-ampere-radar/actions/workflows/421668967/dispatches");eq(last.method,"POST");eq(last.redirect,"manual");eq(await last.json(),{ref:"main",inputs:{mode:"RUN",confirm:"LIVE_CAPACITY_ONLY"}});eq(last.headers.get("Authorization"),"Bearer "+env.RADAR_DISPATCH_TOKEN);
+for(const [status,code] of [[200,"CRON_DISPATCH_ACCEPTED"],[401,"CRON_AUTH_REVIEW"],[403,"CRON_AUTH_REVIEW"],[429,"CRON_RATE_LIMIT"],[404,"CRON_DISPATCH_REVIEW"],[500,"CRON_DISPATCH_REVIEW"],[301,"CRON_FETCH_REDIRECT_ERROR"],[302,"CRON_FETCH_REDIRECT_ERROR"],[307,"CRON_FETCH_REDIRECT_ERROR"],[308,"CRON_FETCH_REDIRECT_ERROR"]])eq(await run({},status),code);
 // Real Cloudflare invocation may have seconds/milliseconds within the scheduled minute.
 eq(await run({controller:{cron:"16,46  * * * * ",scheduledTime:t+5696},now:t+5696}),"CRON_DISPATCH_ACCEPTED");
 eq(await run({controller:{...controller,scheduledTime:t+1}}),"CRON_DISPATCH_ACCEPTED");
