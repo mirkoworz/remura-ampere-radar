@@ -1,0 +1,36 @@
+name: Radar offline Node LAB
+on:
+  push:
+    branches: [feature/radar-offline-lab]
+    paths:
+      - '**.mjs'
+      - '.github/workflows/offline-node-lab.yml'
+permissions: {}
+concurrency:
+  group: radar-offline-node-lab
+  cancel-in-progress: false
+jobs:
+  offline:
+    if: github.repository == 'mirkoworz/remura-ampere-radar' && github.ref == 'refs/heads/feature/radar-offline-lab'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Public source only; no credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_TERMINAL_PROMPT=0
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git init lab
+          cd lab
+          git -c credential.helper= fetch --depth=1 https://github.com/mirkoworz/remura-ampere-radar.git "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          node -e 'if (+process.versions.node.split(".")[0] < 22) process.exit(1)'
+          node cycle-test.mjs
+          node runtime-test.mjs
+          node release-test.mjs
+          node operations-test.mjs
+          node --check operations-entry.mjs
+          node activation-test.mjs
+          node cloudflare/radar-cron-test.mjs

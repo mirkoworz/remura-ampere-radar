@@ -1,0 +1,11 @@
+# REMURA Ampere Radar v0.34 LAB — Cloudflare fallback
+17 November 2026, Europe/Rome.
+
+Independent timer only; GitHub remains the execution platform. No deployment yet.
+- New Worker remura-ampere-cron, no existing services modified; Free account only, verify one free Cron Trigger slot out of five and CPU quota. No KV, D1, queues, domains or paid plan.
+- Deploy exact tested radar-cron.mjs as ES module, no public route (HTTP always 404), preferably disable workers.dev and preview URLs. RADAR_CRON_ENABLE initially OFF, secret RADAR_DISPATCH_TOKEN. Do not add Oracle, Telegram or state credentials.
+- Dedicated fine-grained PAT owned by mirkoworz, only mirkoworz/remura-ampere-radar, Actions read/write, Metadata read, all other permissions none, short expiry (e.g. 90 days). Never paste into chat or source. Actions write is repo-wide, not workflow-specific, so this is not a truly isolated robot identity and revocation is important. Owner must approve this tradeoff and restrict token to this repo. Existing workflow actor and enable checks remain unchanged. Token cannot access private state repository.
+- Single Cron Trigger: 16,46 * * * * UTC; worker code rejects any other expression and outdated/future slots. Only fixed RUN payload to workflow ID 421668967 on main, no activation/maintenance dispatch in code, no retry. No public HTTP endpoint can dispatch. GitHub global lock and durable nextAt limit actual Oracle probes to at least 30 minutes apart. Duplicate workflow requests remain possible.
+- Do not turn on until exact code CI is green and free plan/slot verified. No deployment from connector; owner dashboard needed. First real Cloudflare dispatch must be linked to GitHub run and durable state advance; HTTP 200/204 means accepted only. Cron changes can take up to 15 minutes to propagate, dashboard event history up to 30 minutes.
+- Emergency disable: remove Cloudflare cron or set RADAR_CRON_ENABLE OFF, revoke dedicated PAT, retain GitHub operator gate and stop procedure. No production VPS or other filone touched.
+Sources: https://developers.cloudflare.com/workers/platform/limits/ ; https://developers.cloudflare.com/workers/configuration/cron-triggers/ ; https://docs.github.com/en/rest/actions/workflows?apiVersion=2026-03-10

@@ -1,0 +1,23 @@
+// v0.37 LAB — synthetic tests; never contacts GitHub or Cloudflare.
+import assert from "node:assert/strict";
+import worker,{dispatchRadar,CRON} from "./radar-cron.mjs";
+let n=0;const eq=(a,b)=>{assert.deepEqual(a,b);n++};
+const t=Date.UTC(2026,10,17,22,16),controller={cron:CRON,scheduledTime:t},env={RADAR_CRON_ENABLE:"ENABLED",RADAR_DISPATCH_TOKEN:"github_pat_SYNTHETIC_NOT_REAL_123456789"};
+let calls=0,last;
+const run=async(patch={},status=204)=>dispatchRadar({controller,env,now:t+1000,fetchImpl:async(request)=>{calls++;last=request;return {status};},...patch});
+eq(await run(),"CRON_DISPATCH_ACCEPTED");eq(calls,1);
+eq(last.url,"https://api.github.com/repos/mirkoworz/remura-ampere-radar/actions/workflows/421668967/dispatches");eq(last.method,"POST");eq(last.redirect,"manual");eq(await last.json(),{ref:"main",inputs:{mode:"RUN",confirm:"LIVE_CAPACITY_ONLY"}});eq(last.headers.get("Authorization"),"Bearer "+env.RADAR_DISPATCH_TOKEN);
+for(const [status,code] of [[200,"CRON_DISPATCH_ACCEPTED"],[401,"CRON_AUTH_REVIEW"],[403,"CRON_AUTH_REVIEW"],[429,"CRON_RATE_LIMIT"],[404,"CRON_DISPATCH_REVIEW"],[500,"CRON_DISPATCH_REVIEW"],[301,"CRON_FETCH_REDIRECT_ERROR"],[302,"CRON_FETCH_REDIRECT_ERROR"],[307,"CRON_FETCH_REDIRECT_ERROR"],[308,"CRON_FETCH_REDIRECT_ERROR"]])eq(await run({},status),code);
+// Real Cloudflare invocation may have seconds/milliseconds within the scheduled minute.
+eq(await run({controller:{cron:"16,46  * * * * ",scheduledTime:t+5696},now:t+5696}),"CRON_DISPATCH_ACCEPTED");
+eq(await run({controller:{...controller,scheduledTime:t+1}}),"CRON_DISPATCH_ACCEPTED");
+eq(await run({now:t-5000}),"CRON_DISPATCH_ACCEPTED");
+eq(await run({controller:{...controller,scheduledTime:t+59999},now:t+60000}),"CRON_DISPATCH_ACCEPTED");
+eq(await run({now:t+600000}),"CRON_DISPATCH_ACCEPTED");
+const before=calls;
+for(const [patch,code] of [[{env:{}},"CRON_DISABLED"],[{env:{...env,RADAR_DISPATCH_TOKEN:"bad"}},"CRON_CONFIG_REVIEW"],[{controller:{...controller,cron:"* * * * *"}},"CRON_SLOT_RULE_REJECTED"],[{controller:{...controller,scheduledTime:t+60000}},"CRON_SLOT_TIME_REJECTED"],[{controller:{...controller,scheduledTime:NaN}},"CRON_SLOT_TIME_REJECTED"],[{controller:{...controller,scheduledTime:8640000000000001}},"CRON_SLOT_TIME_REJECTED"],[{now:t-5001},"CRON_SLOT_CLOCK_REJECTED"],[{now:t+600001},"CRON_SLOT_CLOCK_REJECTED"],[{now:NaN},"CRON_SLOT_CLOCK_REJECTED"]])eq(await run(patch),code);
+eq(calls,before);eq(await run({fetchImpl:async()=>{throw Error("synthetic secret");}}),"CRON_FETCH_UNCERTAIN");eq(await run({fetchImpl:async()=>{throw new TypeError("synthetic secret");}}),"CRON_FETCH_TYPE_OTHER");eq(await run({fetchImpl:async(request)=>{eq(request.signal.aborted,false);throw Error("simulated network");}}),"CRON_FETCH_UNCERTAIN");for(const [message,code] of [["Illegal invocation: incorrect this reference","CRON_FETCH_RECEIVER_ERROR"],["redirect encountered","CRON_FETCH_REDIRECT_ERROR"],["fetch failed","CRON_FETCH_NETWORK_ERROR"]])eq(await run({fetchImpl:async()=>{throw new TypeError(message);}}),code);
+const originalFetch=globalThis.fetch;
+try{globalThis.fetch=async function(request){eq(this,globalThis);eq(request instanceof Request,true);return {status:204};};eq(await dispatchRadar({controller,env,now:t+1000}),"CRON_DISPATCH_ACCEPTED");}finally{globalThis.fetch=originalFetch;}
+eq(worker.fetch().status,404);let noRetry=0;await worker.scheduled({...controller,noRetry:()=>noRetry++},{RADAR_CRON_ENABLE:"OFF"});eq(noRetry,1);
+console.log("CLOUDFLARE_CRON_LAB_OK checks="+n);
