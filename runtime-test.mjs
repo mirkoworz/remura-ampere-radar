@@ -7,19 +7,19 @@ const env={RADAR_RUNTIME_GATE:"LIVE_CAPACITY_ONLY",GITHUB_REPOSITORY:"mirkoworz/
 const row=(cpu,ram,status)=>({cpu,ram,status});
 const no={candidate:null,results:[row(2,12,"OUT_OF_HOST_CAPACITY"),row(1,6,"OUT_OF_HOST_CAPACITY")]};
 const yes={candidate:row(2,12,"AVAILABLE_UNQUANTIFIED"),results:[row(2,12,"AVAILABLE_UNQUANTIFIED"),row(1,6,"OUT_OF_HOST_CAPACITY")]};
-function fixture({enabled=true,result=no,failSend=false}={}){
- let state={schema:1,enabled,revision:0,nextAt:0,last:null,pending:[]},rev=1,now=1800000000000,probes=0,sends=0,writes=0,lastText="";
+function fixture({enabled=true,result=no,failSend=false,dueIn=0,onSleep=null}={}){
+ let state={schema:1,enabled,revision:0,nextAt:1800000000000+dueIn,last:null,pending:[]},rev=1,now=1800000000000,probes=0,sends=0,writes=0,lastText="",waits=[],reads=0;
  const sha=()=>rev.toString(16).padStart(40,"0");
  const res=(body,status=200)=>new Response(JSON.stringify(body),{status});
  const path="https://api.github.com/repos/mirkoworz/remura-radar-state/contents/state.json";
  const fetchImpl=async(url,opts)=>{
-   if(url===path+"?ref=main"&&opts.method==="GET")return res({sha:sha(),type:"file",encoding:"base64",content:Buffer.from(JSON.stringify(state)).toString("base64")});
+   if(url===path+"?ref=main"&&opts.method==="GET"){reads++;return res({sha:sha(),type:"file",encoding:"base64",content:Buffer.from(JSON.stringify(state)).toString("base64")});}
    if(url===path&&opts.method==="PUT"){const body=JSON.parse(opts.body);if(body.sha!==sha())return res({},409);state=JSON.parse(Buffer.from(body.content,"base64").toString());rev++;writes++;return res({content:{sha:sha()}})}
    if(url==="https://api.telegram.org/bot"+env.RADAR_TELEGRAM_TOKEN+"/sendMessage"&&opts.method==="POST"){sends++;const body=JSON.parse(opts.body);assert.equal(body.allow_paid_broadcast,false);assert.equal(body.chat_id,"12345");lastText=body.text;if(failSend)throw Error("mock uncertain");return res({ok:true,result:{message_id:123,chat:{id:12345}}});}
    throw Error("network forbidden");
  };
- const runtime=buildRuntime({env,fetchImpl,clock:()=>now,probeFactory:()=>async()=>{probes++;return result;}});
- return {run:runtime.run,state:()=>state,probes:()=>probes,sends:()=>sends,writes:()=>writes,text:()=>lastText,advance:ms=>{now+=ms},setResult:r=>{result=r}};
+ const runtime=buildRuntime({env,fetchImpl,clock:()=>now,probeFactory:()=>async()=>{probes++;return result;},sleep:async ms=>{waits.push(ms);now+=ms;if(onSleep)await onSleep({state,advance:n=>{now+=n}});}});
+ return {run:runtime.run,state:()=>state,probes:()=>probes,sends:()=>sends,writes:()=>writes,text:()=>lastText,advance:ms=>{now+=ms},setResult:r=>{result=r},waits:()=>waits,reads:()=>reads};
 }
 let x=fixture({enabled:false});eq(await x.run(),"DISABLED");eq(x.probes(),0);eq(x.writes(),0);eq(x.sends(),0);
 x=fixture();eq(await x.run(),"NOTHING_PENDING");eq(x.probes(),1);eq(x.state().health.failures,0);eq(x.state().health.lastGoodAt,1800000000000);eq(await x.run(),"NOT_DUE");eq(x.probes(),1);
@@ -34,4 +34,13 @@ assert.throws(()=>recordHealth({health:h},0,no,true));n++;
 assert.throws(()=>buildRuntime({env:{...env,RADAR_RUNTIME_GATE:"WRONG"}}));n++;
 eq(formatCapacityAlert({key:"2/12",observedAt:Date.UTC(2026,10,17,16,30,13)}).includes("17:30:13"),true);
 eq(formatCapacityAlert({key:"1/6",observedAt:Date.UTC(2026,6,17,16,30,13)}).includes("18:30:13"),true);
+// New v0.35 integration cases, synthetic clocks and mocked transport only.
+x=fixture({dueIn:7164});eq(await x.run(),"NOTHING_PENDING");eq(x.waits().length,1);eq(x.waits()[0],7164);eq(x.probes(),1);eq(x.state().health.lastGoodAt,1800000007164);eq(x.state().nextAt,1800001807164);eq(x.sends(),0);
+x=fixture({dueIn:60001});eq(await x.run(),"NOT_DUE");eq(x.waits().length,0);eq(x.probes(),0);eq(x.writes(),0);
+x=fixture({dueIn:60000});eq(await x.run(),"NOTHING_PENDING");eq(x.waits()[0],60000);eq(x.probes(),1);
+x=fixture({dueIn:100,onSleep:({state})=>{state.enabled=false;}});eq(await x.run(),"DISABLED");eq(x.probes(),0);eq(x.writes(),0);
+x=fixture({dueIn:100,onSleep:({state})=>{state.nextAt+=1800000;}});eq(await x.run(),"NOT_DUE");eq(x.probes(),0);eq(x.writes(),0);
+x=fixture({dueIn:100,onSleep:({state})=>{state.pending=[{key:"2/12",observedAt:1}];state.delivery={key:"2/12",observedAt:1,startedAt:2};}});eq(await x.run(),"DELIVERY_REVIEW_REQUIRED");eq(x.probes(),0);eq(x.sends(),0);eq(x.writes(),0);
+x=fixture({dueIn:100,onSleep:()=>{throw Error("mock sleep failure");}});eq(await x.run(),"RUNTIME_REVIEW_REQUIRED");eq(x.probes(),0);eq(x.writes(),0);
+x=fixture({dueIn:100,onSleep:({advance})=>advance(-101)});eq(await x.run(),"STATE_INVALID");eq(x.probes(),0);eq(x.writes(),0);
 console.log("RUNTIME_LAB_OK checks="+n);

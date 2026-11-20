@@ -1,7 +1,7 @@
 name: Radar offline Node LAB
 on:
   push:
-    branches: [feature/radar-offline-lab]
+    branches: [research/radar-wake-boundary-20261120]
     paths:
       - '**.mjs'
       - '.github/workflows/offline-node-lab.yml'
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   offline:
-    if: github.repository == 'mirkoworz/remura-ampere-radar' && github.ref == 'refs/heads/feature/radar-offline-lab'
+    if: github.repository == 'mirkoworz/remura-ampere-radar' && github.ref == 'refs/heads/research/radar-wake-boundary-20261120'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -28,6 +28,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           node -e 'if (+process.versions.node.split(".")[0] < 22) process.exit(1)'
           node cycle-test.mjs
+          node wake-boundary-test.mjs
           node runtime-test.mjs
           node release-test.mjs
           node operations-test.mjs
