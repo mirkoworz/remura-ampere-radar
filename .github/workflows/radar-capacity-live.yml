@@ -1,4 +1,4 @@
-# REMURA Ampere Radar v0.33 — 17 November 2026, Europe/Rome
+# REMURA Ampere Radar v0.36 — 20 November 2026, Europe/Rome (release candidate)
 # Operator-authorized release; two gates: repository variable and private enabled state.
 name: Radar capacity live
 on:
@@ -60,7 +60,7 @@ jobs:
         run: |
           set -euo pipefail
           export GIT_TERMINAL_PROMPT=0
-          expected=c3195b841043880fb5aaac5671c5eff1226a3347
+          expected=744f23e302ad293705916b7778b9faad5ce091e6
           [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
           git init lab
           cd lab
