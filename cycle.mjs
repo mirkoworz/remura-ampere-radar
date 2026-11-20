@@ -13,13 +13,13 @@ function completeReport(result){
  const best=rows.flat().find(r=>r.status.startsWith("AVAILABLE_"));
  return best?result.candidate?.cpu===best.cpu&&result.candidate?.ram===best.ram&&result.candidate?.status===best.status:result.candidate===null;
 }
-async function runCycle({store,probe,deliver,clock}){
+async function runCycle({store,probe,deliver,clock,onReservationBlock}){
  // Requires a single global scheduler/maintenance lock, not only local CAS.
  let first;try{first=await store.read()}catch{return "STATE_READ_UNCERTAIN"}
  if(first?.state?.enabled!==true)return "DISABLED";
  if(first.state.delivery!=null)return "DELIVERY_REVIEW_REQUIRED";
  let fresh=false;
- const status=await runOnce({store,clock,reserve,nextAllowed,probe:async()=>{const r=await probe();fresh=completeReport(r);return r;},
+ const status=await runOnce({store,clock,reserve,nextAllowed,onReservationBlock,probe:async()=>{const r=await probe();fresh=completeReport(r);return r;},
  record:(s,t,r)=>{const next=recordHealth(record(s,t,r),t,r,fresh);return fresh?reconcileFresh(next,t,r):next;}});
  if(status!=="RECORDED")return status;
  if(!fresh)return "INCOMPLETE_NO_SEND";

@@ -29,6 +29,7 @@ jobs:
           node -e 'if (+process.versions.node.split(".")[0] < 22) process.exit(1)'
           node cycle-test.mjs
           node wake-boundary-test.mjs
+          node reservation-diagnostic-test.mjs
           node runtime-test.mjs
           node release-test.mjs
           node operations-test.mjs

@@ -1,4 +1,4 @@
-// v0.35 LAB — draft entrypoint; no scheduler, activation, or I/O on import.
+// v0.36 LAB — draft entrypoint; no scheduler, activation, or I/O on import.
 import {makeStore} from "./store.mjs";
 import {makeGitHubTransport} from "./transport.mjs";
 import {createOCIProbe} from "./oci.mjs";
@@ -11,7 +11,7 @@ function formatCapacityAlert(event){
  if(!event||!["2/12","1/6"].includes(event.key)||!Number.isSafeInteger(event.observedAt)||event.observedAt<0||event.observedAt>8640000000000000)throw Error("event");
  const [cpu,ram]=event.key.split("/");
  const date=new Intl.DateTimeFormat("it-IT",{timeZone:"Europe/Rome",dateStyle:"short",timeStyle:"medium"}).format(new Date(event.observedAt));
- return "REMURA Ampere Radar v0.35 LAB — disponibilità segnalata\n"+date+" (ora italiana)\nOracle Milano: "+cpu+" OCPU / "+ram+" GB RAM\n"+(event.key==="2/12"?"Configurazione preferita.":"Configurazione alternativa.")+"\nÈ una segnalazione di capacità, non una garanzia di quota o creazione. Verifica la console Oracle. Nessuna VPS prenotata o creata.";
+ return "REMURA Ampere Radar v0.36 LAB — disponibilità segnalata\n"+date+" (ora italiana)\nOracle Milano: "+cpu+" OCPU / "+ram+" GB RAM\n"+(event.key==="2/12"?"Configurazione preferita.":"Configurazione alternativa.")+"\nÈ una segnalazione di capacità, non una garanzia di quota o creazione. Verifica la console Oracle. Nessuna VPS prenotata o creata.";
 }
 
 function buildRuntime({env,fetchImpl=globalThis.fetch,clock=Date.now,probeFactory=createOCIProbe,sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms))}){
@@ -55,7 +55,10 @@ function buildRuntime({env,fetchImpl=globalThis.fetch,clock=Date.now,probeFactor
      const data=JSON.parse(Buffer.concat(chunks).toString("utf8"));
      return {status:200,json:async()=>data};
    }});
-   const outcome=await runCycle({store,probe,deliver,clock});
+   const outcome=await runCycle({store,probe,deliver,clock,onReservationBlock:reason=>{
+     if(["WRITE_UNCERTAIN","ACK_INVALID","READBACK_UNCERTAIN","READBACK_MISSING","READBACK_VERSION","READBACK_DISABLED","READBACK_NEXT_AT"].includes(reason))
+       console.log("REMURA_RADAR_RESERVATION_BLOCK="+reason);
+   }});
    if(outcome!=="INCOMPLETE_NO_SEND")return outcome;
    const end=await store.read();
    return healthOutcome(initial.state.health,end.state.health,outcome);

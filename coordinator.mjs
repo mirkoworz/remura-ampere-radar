@@ -1,5 +1,6 @@
 // v0.6 LAB — 2026-11-17 CET — dependency-injected orchestration, no live I/O.
-async function runOnce({store,probe,clock,reserve,record,nextAllowed}){
+async function runOnce({store,probe,clock,reserve,record,nextAllowed,onReservationBlock=()=>{}}){
+  const blocked=reason=>{try{onReservationBlock(reason);}catch{}return "RESERVATION_UNCERTAIN";};
   const item=await store.read();
   if(!item||typeof item.version!=="string"||!item.version||!item.state||!Array.isArray(item.state.pending))return "STATE_INVALID";
   if(item.state.enabled!==true)return "DISABLED";
@@ -8,12 +9,15 @@ async function runOnce({store,probe,clock,reserve,record,nextAllowed}){
   const reserved=reserve(item.state,now);
   // A failed or ambiguous write must never lead to a probe.
   let version;
-  try{version=await store.compareAndSwap(item.version,reserved);}catch{return "RESERVATION_UNCERTAIN";}
-  if(typeof version!=="string"||!version||version===item.version)return "RESERVATION_UNCERTAIN";
+  try{version=await store.compareAndSwap(item.version,reserved);}catch{return blocked("WRITE_UNCERTAIN");}
+  if(typeof version!=="string"||!version||version===item.version)return blocked("ACK_INVALID");
   // Read the acknowledged durable revision; do not probe on mismatch.
   let confirmed;
-  try{confirmed=await store.read();}catch{return "RESERVATION_UNCERTAIN";}
-  if(!confirmed||confirmed.version!==version||confirmed.state?.enabled!==true||confirmed.state.nextAt!==reserved.nextAt)return "RESERVATION_UNCERTAIN";
+  try{confirmed=await store.read();}catch{return blocked("READBACK_UNCERTAIN");}
+  if(!confirmed)return blocked("READBACK_MISSING");
+  if(confirmed.version!==version)return blocked("READBACK_VERSION");
+  if(confirmed.state?.enabled!==true)return blocked("READBACK_DISABLED");
+  if(confirmed.state.nextAt!==reserved.nextAt)return blocked("READBACK_NEXT_AT");
   let result;
   try{result=await probe();}catch{result={error:"UNKNOWN"};}
   const finished=record(confirmed.state,Math.max(now,clock()),result);
